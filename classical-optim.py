@@ -3,7 +3,7 @@ import re
 import fileinput
 import sys
 import os
-#import numpy as np
+import numpy as np
 
 ####################
 #some constants
@@ -118,35 +118,85 @@ class qcircuit:		# quantum circuit class
         self.bittypes = bittypes
         self.gates = []
         self.classical_subcircuits = []
-        self.optimized_gates = []
+        self.optimized_subcircuits = []
 
     def add_gate(self, qgate): self.gates.append(qgate)
 
     def generate_classical_subcircuits(self):
-        gate_id = -1
         init_id = 0
         used_bits = dict([(bit, False) for bit in self.bits])
         forbidden_bits = dict([(bit, False) for bit in self.bits])
+        cls_ln = 0
+        for gate_id, qgate in enumerate(self.gates):
 
-        for qgate in self.gates:
-            gate_id += 1
+            new_circuit = False
+
             if qgate.gatetype == 'CNOT' or qgate.gatetype == 'Tof':
                 for op in qgate.ops:
-                    if forbidden_bits[op] == True:
-                        self.classical_subcircuits.append((init_id, used_bits))
-                        init_id = gate_id
-                        used_bits = dict([(bit, False) for bit in self.bits])
-                        forbidden_bits = dict([(bit, False) for bit in self.bits])
-                    else:    
+                    used_bits[op] = True
+                    if forbidden_bits[op]: new_circuit = True
+
+                if new_circuit:
+                    self.classical_subcircuits.append((init_id, used_bits, gate_id-init_id, cls_ln))
+                    init_id = gate_id
+                    used_bits = dict([(bit, False) for bit in self.bits])
+                    for op in qgate.ops:
                         used_bits[op] = True
+                    forbidden_bits = dict([(bit, False) for bit in self.bits])
+                    cls_ln = 1
+
+                else:    
+                    cls_ln += 1
             else:
                 for op in qgate.ops:
                     forbidden_bits[op] = True
 
-        self.classical_subcircuits.append((init_id, used_bits))
+        self.classical_subcircuits.append((init_id, used_bits, gate_id - init_id, cls_ln))
+    def optimize_circuits(self):
+        for subcircuit in self.classical_subcircuits:
+            self.optimized_subcircuits.append(self.optimize_circuit(subcircuit))
+    
+    def optimize_circuit(self, para):
+        start, all_bits, ln, cls_ln = para
+        bits = np.array([qb for qb in all_bits if all_bits[qb] == True])
+        col_num = len(bits)
+        row_num = cls_ln
+        end = start + ln
+        qgates = []
+        cls_ind = -1
+        print "my cls_ln is", cls_ln
+
+        bits_dict = dict([(bits[i], i) for i in range(col_num)])
 
 
+        circuit = np.zeros((row_num, col_num), dtype = np.int8)
 
+        print "bits", bits
+
+        for ind in range(start, end):
+
+            if self.gates[ind].gatetype != ("CNOT" or "Tof"):
+                qgates.append(self.gates[ind])
+                continue
+
+            elif self.gates[ind].gatetype == "CNOT":
+                print "I am gate number:", self.gates[ind].id
+
+                cls_ind += 1
+                print "my cls_ind", cls_ind
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]= 1
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]= -1
+
+            else:
+                cls_ind += 1
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]=1
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]=1
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[2]]]=-1
+
+        print circuit
+        return circuit
+    
+    
 
 #--------------------------------------
 #main
@@ -157,11 +207,12 @@ for g in qp.gates:			# add each gate to the circuit
 
 qc.generate_classical_subcircuits()
 for cir in qc.classical_subcircuits:
-    print "init:"+str(cir[0])
-    print "used bits:"
-    for bit in cir[1]:
-        if cir[1][bit] == True: print bit
+    print "init:"+str(cir[0]+38)+" length"+str(cir[2])+" cls_ln"+str(cir[3])
+    #print "used bits:"
+    #for bit in cir[1]:
+    #    if cir[1][bit] == True: print bit
 
+qc.optimize_circuits()
 
 ####################
 #Helper functions
