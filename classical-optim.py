@@ -117,6 +117,7 @@ class qcircuit:		# quantum circuit class
         self.bits = bits
         self.bittypes = bittypes
         self.gates = []
+        self.qgates = []
         self.classical_subcircuits = []
         self.optimized_subcircuits = []
 
@@ -152,11 +153,22 @@ class qcircuit:		# quantum circuit class
                     forbidden_bits[op] = True
 
         self.classical_subcircuits.append((init_id, used_bits, gate_id - init_id, cls_ln))
+
     def optimize_circuits(self):
         for subcircuit in self.classical_subcircuits:
-            self.optimized_subcircuits.append(self.optimize_circuit(subcircuit))
+            self.optimized_subcircuits.append(self.__optimize_circuit(subcircuit))
+        print self.optimized_subcircuits[2]
     
-    def optimize_circuit(self, para):
+    def __optimize_circuit(self, para):
+    
+        return self.__convert_to_matrix(para)
+        #return  self.__optimized_matrix(self.__convert_to_matrix(para))
+
+    #########################
+    #private helper methods 
+    #########################
+    def __convert_to_matrix(self, para):
+
         start, all_bits, ln, cls_ln = para
         bits = np.array([qb for qb in all_bits if all_bits[qb] == True])
         col_num = len(bits)
@@ -164,14 +176,10 @@ class qcircuit:		# quantum circuit class
         end = start + ln
         qgates = []
         cls_ind = -1
-        print "my cls_ln is", cls_ln
 
         bits_dict = dict([(bits[i], i) for i in range(col_num)])
 
-
         circuit = np.zeros((row_num, col_num), dtype = np.int8)
-
-        print "bits", bits
 
         for ind in range(start, end):
 
@@ -180,10 +188,7 @@ class qcircuit:		# quantum circuit class
                 continue
 
             elif self.gates[ind].gatetype == "CNOT":
-                print "I am gate number:", self.gates[ind].id
-
                 cls_ind += 1
-                print "my cls_ind", cls_ind
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]= 1
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]= -1
 
@@ -192,26 +197,26 @@ class qcircuit:		# quantum circuit class
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]=1
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]=1
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[2]]]=-1
-
-        print circuit
+        self.qgates.append(qgates) 
         return circuit
-    
-    
 
+ 
+    #def __optimize_matrix(circuit):
+
+        
+
+
+
+        
 #--------------------------------------
 #main
+#--------------------------------------
 qp = qasm_parser(fileinput.input())	# parse the qasm file
 qc = qcircuit(qp.bits,qp.bittypes)	# initialize the circuit
 for g in qp.gates:			# add each gate to the circuit
     qc.add_gate(g)
 
 qc.generate_classical_subcircuits()
-for cir in qc.classical_subcircuits:
-    print "init:"+str(cir[0]+38)+" length"+str(cir[2])+" cls_ln"+str(cir[3])
-    #print "used bits:"
-    #for bit in cir[1]:
-    #    if cir[1][bit] == True: print bit
-
 qc.optimize_circuits()
 
 ####################
