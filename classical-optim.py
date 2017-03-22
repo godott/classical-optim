@@ -4,6 +4,7 @@ import fileinput
 import sys
 import os
 import numpy as np
+import cPickle as pickle
 
 ####################
 #some constants
@@ -106,22 +107,27 @@ class qasm_parser:
             # gate acting on qubits
             m = re.compile('\s*(\S+)\s+(\S+)').search(line)
             if(m):
+        
                 op = m.group(1)
                 args = m.group(2)
                 self.gates.append(Qgate(op,args,linenum))
                 continue
 
-class qcircuit:		# quantum circuit class
+class qcircuit:  # quantum circuit class
 
     def __init__(self, bits, bittypes):
         self.bits = bits
         self.bittypes = bittypes
         self.gates = []
-        self.qgates = []
         self.classical_subcircuits = []
         self.optimized_subcircuits = []
+        self.swap_table = dict(zip(bits, bits))
+        self.output_string=''
+        for bit in self.bits:
+            self.output_string += 'qubit '+bit+'\n'
 
-    def add_gate(self, qgate): self.gates.append(qgate)
+    def add_gate(self, qgate):
+        self.gates.append(qgate)
 
     def generate_classical_subcircuits(self):
         init_id = 0
@@ -141,6 +147,7 @@ class qcircuit:		# quantum circuit class
                     self.classical_subcircuits.append((init_id, used_bits, gate_id-init_id, cls_ln))
                     init_id = gate_id
                     used_bits = dict([(bit, False) for bit in self.bits])
+        
                     for op in qgate.ops:
                         used_bits[op] = True
                     forbidden_bits = dict([(bit, False) for bit in self.bits])
@@ -152,33 +159,26 @@ class qcircuit:		# quantum circuit class
                 for op in qgate.ops:
                     forbidden_bits[op] = True
 
-        self.classical_subcircuits.append((init_id, used_bits, gate_id - init_id, cls_ln))
+        self.classical_subcircuits.append((init_id, used_bits, gate_id - init_id+1, cls_ln))
 
     def optimize_circuits(self):
         for subcircuit in self.classical_subcircuits:
-            self.optimized_subcircuits.append(self.__optimize_circuit(subcircuit))
-        print self.optimized_subcircuits[2]
+            self.output_string += self.__optimize_circuit(subcircuit)
+        output_file.write(self.output_string)    
     
     def __optimize_circuit(self, para):
-    
-        return self.__convert_to_matrix(para)
-        #return  self.__optimized_matrix(self.__convert_to_matrix(para))
-
-    #########################
-    #private helper methods 
-    #########################
-    def __convert_to_matrix(self, para):
-
+        
         start, all_bits, ln, cls_ln = para
         bits = np.array([qb for qb in all_bits if all_bits[qb] == True])
         col_num = len(bits)
         row_num = cls_ln
         end = start + ln
+        return_string = ''
         qgates = []
         cls_ind = -1
 
         bits_dict = dict([(bits[i], i) for i in range(col_num)])
-
+        
         circuit = np.zeros((row_num, col_num), dtype = np.int8)
 
         for ind in range(start, end):
@@ -190,24 +190,52 @@ class qcircuit:		# quantum circuit class
             elif self.gates[ind].gatetype == "CNOT":
                 cls_ind += 1
                 circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]= 1
-                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]= -1
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]= -7
 
             else:
                 cls_ind += 1
-                circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]=1
-                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]=1
-                circuit[cls_ind][bits_dict[self.gates[ind].ops[2]]]=-1
-        self.qgates.append(qgates) 
-        return circuit
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[0]]]=2
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[1]]]=2
+                circuit[cls_ind][bits_dict[self.gates[ind].ops[2]]]=-5
+        removing_matrix = np.einsum('ij,ij->i', circuit, np.roll(circuit, -1, axis = 0))
+        mask = np.ones_like(circuit, dtype = bool)
 
- 
-    #def __optimize_matrix(circuit):
+        for i in range(circuit.shape[0]): 
+            if np.any(mask[i] == False):
+                continue
+            a, b =np.nonzero(circuit[i])[0]
+            if i == circuit.shape[0]-1:
+                return_string += 'CNOT ' + self.swap_table[bits[a]]+','+self.swap_table[bits[b]]+'\n'
+                continue
+            if circuit.shape[0]< 2:
+                return_string += 'CNOT ' + self.swap_table[bits[a]]+','+self.swap_table[bits[b]]+'\n'
+                continue
 
-        
+            if removing_matrix[i] == 50 or removing_matrix[i] == 33:
+                mask[[i,i+1]] = False
+                continue
 
+            if removing_matrix[i] == -14 and removing_matrix[i+1]==-14:
+                mask[[i+1, i+2]] = False
+                self.swap_table[bits[a]], self.swap_table[bits[b]] = self.swap_table[bits[b]], self.swap_table[bits[a]]
+                continue
+            if removing_matrix[i] == -14:
+                mask[i+1] = False
+                self.swap_table[bits[a]], self.swap_table[bits[b]] = self.swap_table[bits[b]], self.swap_table[bits[a]]
+                return_string += 'CNOT ' + self.swap_table[bits[a]]+','+self.swap_table[bits[b]]+'\n'
+                continue
 
+            
+            return_string += 'CNOT ' + self.swap_table[bits[a]]+','+self.swap_table[bits[b]]+'\n'
 
-        
+        for gate in qgates: 
+            if len(gate.gatetype)==2:
+                return_string += gate.gatetype+' '+self.swap_table[gate.ops[0]]+','+self.swap_table[gate.ops[1]]+'\n'
+            else:
+                return_string += gate.gatetype+' '+self.swap_table[gate.ops[0]]+'\n'
+
+        return return_string
+
 #--------------------------------------
 #main
 #--------------------------------------
